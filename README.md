@@ -11,7 +11,7 @@
 
 ### Features [To be added/Implemented] 
     [✅️ = Done | ❌️ = Not done yet]
-- Bootable with OneUI7 ✅️
+- Bootable with OneUI7/8 ❌️
 - Upstreamed to 4.19.356 ✅️
 - KernelSU ❌️
 - Maybe more in future
