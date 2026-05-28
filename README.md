@@ -19,7 +19,7 @@
 ### Progress
 - LineageOS boot ✅️
 - S Pen on LineageOS ❌️
-- One UI 7/8 boot ❌️, but takes longer to crash compared to stock P613 kernel
+- One UI 7/8 boot ❌️, but takes longer to crash compared to LineageOS P613 kernel
 
 ### About this Repository:
 - This kernel was created in late May 2026 from the merging of the Stock P613 kernel from the P613XXU4CWL1 build, with the latest kernel (4.14.356) used on the LineageOS for this model.
