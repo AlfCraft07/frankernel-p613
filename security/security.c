@@ -22,6 +22,7 @@
 #include <linux/integrity.h>
 #include <linux/ima.h>
 #include <linux/evm.h>
+#include <linux/task_integrity.h>
 #include <linux/fsnotify.h>
 #include <linux/mman.h>
 #include <linux/mount.h>
@@ -199,10 +200,17 @@ EXPORT_SYMBOL(unregister_lsm_notifier);
  *	This is a hook that returns a value.
  */
 
+/*
+ * security_integrity_current() is added, 
+ * which has a dependency of CONFIG_RKP_KDP.
+ * security_integrity_current is added to check integrity of credential context.
+ * if CONFIG_RKP_KDP is disabled, it will always return 0.
+ */
 #define call_void_hook(FUNC, ...)				\
 	do {							\
 		struct security_hook_list *P;			\
 								\
+		if(security_integrity_current()) break;		\
 		list_for_each_entry(P, &security_hook_heads.FUNC, list)	\
 			P->hook.FUNC(__VA_ARGS__);		\
 	} while (0)
@@ -212,6 +220,9 @@ EXPORT_SYMBOL(unregister_lsm_notifier);
 	do {							\
 		struct security_hook_list *P;			\
 								\
+		RC = security_integrity_current();		\
+		if (RC != 0)					\
+			break;					\
 		list_for_each_entry(P, &security_hook_heads.FUNC, list) { \
 			RC = P->hook.FUNC(__VA_ARGS__);		\
 			if (RC != 0)				\
@@ -274,12 +285,16 @@ int security_capset(struct cred *new, const struct cred *old,
 				effective, inheritable, permitted);
 }
 
-int security_capable(const struct cred *cred,
-		     struct user_namespace *ns,
-		     int cap,
-		     unsigned int opts)
+int security_capable(const struct cred *cred, struct user_namespace *ns,
+		     int cap)
 {
-	return call_int_hook(capable, 0, cred, ns, cap, opts);
+	return call_int_hook(capable, 0, cred, ns, cap, SECURITY_CAP_AUDIT);
+}
+
+int security_capable_noaudit(const struct cred *cred, struct user_namespace *ns,
+			     int cap)
+{
+	return call_int_hook(capable, 0, cred, ns, cap, SECURITY_CAP_NOAUDIT);
 }
 
 int security_quotactl(int cmds, int type, int id, struct super_block *sb)
@@ -335,6 +350,9 @@ int security_bprm_check(struct linux_binprm *bprm)
 	int ret;
 
 	ret = call_int_hook(bprm_check_security, 0, bprm);
+	if (ret)
+		return ret;
+	ret = five_bprm_check(bprm);
 	if (ret)
 		return ret;
 	return ima_bprm_check(bprm);
@@ -734,6 +752,9 @@ int security_inode_setxattr(struct dentry *dentry, const char *name,
 		ret = cap_inode_setxattr(dentry, name, value, size, flags);
 	if (ret)
 		return ret;
+	ret = five_inode_setxattr(dentry, name, value, size);
+	if (ret)
+		return ret;
 	ret = ima_inode_setxattr(dentry, name, value, size);
 	if (ret)
 		return ret;
@@ -776,6 +797,9 @@ int security_inode_removexattr(struct dentry *dentry, const char *name)
 	ret = call_int_hook(inode_removexattr, 1, dentry, name);
 	if (ret == 1)
 		ret = cap_inode_removexattr(dentry, name);
+	if (ret)
+		return ret;
+	ret = five_inode_removexattr(dentry, name);
 	if (ret)
 		return ret;
 	ret = ima_inode_removexattr(dentry, name);
@@ -882,23 +906,6 @@ int security_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return call_int_hook(file_ioctl, 0, file, cmd, arg);
 }
 
-/**
- * security_file_ioctl_compat() - Check if an ioctl is allowed in compat mode
- * @file: associated file
- * @cmd: ioctl cmd
- * @arg: ioctl arguments
- *
- * Compat version of security_file_ioctl() that correctly handles 32-bit
- * processes running on 64-bit kernels.
- *
- * Return: Returns 0 if permission is granted.
- */
-int security_file_ioctl_compat(struct file *file, unsigned int cmd,
-			       unsigned long arg)
-{
-	return call_int_hook(file_ioctl_compat, 0, file, cmd, arg);
-}
-
 static inline unsigned long mmap_prot(struct file *file, unsigned long prot)
 {
 	/*
@@ -935,13 +942,15 @@ static inline unsigned long mmap_prot(struct file *file, unsigned long prot)
 int security_mmap_file(struct file *file, unsigned long prot,
 			unsigned long flags)
 {
-	unsigned long prot_adj = mmap_prot(file, prot);
 	int ret;
-
-	ret = call_int_hook(mmap_file, 0, file, prot, prot_adj, flags);
+	ret = call_int_hook(mmap_file, 0, file, prot,
+					mmap_prot(file, prot), flags);
 	if (ret)
 		return ret;
-	return ima_file_mmap(file, prot, prot_adj, flags);
+	ret = five_file_mmap(file, prot);
+	if (ret)
+		return ret;
+	return ima_file_mmap(file, prot);
 }
 
 int security_mmap_addr(unsigned long addr)
@@ -989,7 +998,11 @@ int security_file_open(struct file *file, const struct cred *cred)
 	if (ret)
 		return ret;
 
-	return fsnotify_perm(file, MAY_OPEN);
+	ret = fsnotify_perm(file, MAY_OPEN);
+	if (ret)
+		return ret;
+
+	return five_file_open(file);
 }
 
 int security_task_alloc(struct task_struct *task, unsigned long clone_flags)
@@ -1000,6 +1013,7 @@ int security_task_alloc(struct task_struct *task, unsigned long clone_flags)
 void security_task_free(struct task_struct *task)
 {
 	call_void_hook(task_free, task);
+	five_task_free(task);
 }
 
 int security_cred_alloc_blank(struct cred *cred, gfp_t gfp)
@@ -1028,13 +1042,6 @@ void security_transfer_creds(struct cred *new, const struct cred *old)
 {
 	call_void_hook(cred_transfer, new, old);
 }
-
-void security_cred_getsecid(const struct cred *c, u32 *secid)
-{
-	*secid = 0;
-	call_void_hook(cred_getsecid, c, secid);
-}
-EXPORT_SYMBOL(security_cred_getsecid);
 
 int security_kernel_act_as(struct cred *new, u32 secid)
 {
