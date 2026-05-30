@@ -2905,9 +2905,10 @@ static struct smack_known *smack_of_shm(struct kern_ipc_perm *shp)
  */
 static int smack_shm_alloc_security(struct kern_ipc_perm *shp)
 {
-	struct smack_known **blob = smack_ipc(isp);
+	struct kern_ipc_perm *isp = &shp->shm_perm;
+	struct smack_known *skp = smk_of_current();
 
-	*blob = smk_of_current();
+	isp->security = skp;
 	return 0;
 }
 
