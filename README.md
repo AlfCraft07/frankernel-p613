@@ -1,3 +1,7 @@
+## INFO: This project has been abandoned and its repository archived. Original goal of the project available at [P613 Valeryn repository](https://github.com/AlfCraft07/valeryn_samsung_sm7125_P613)
+
+
+
 # Galaxy Tab S6 Lite 2022 Kernel
 
 > [!NOTE]
